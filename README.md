@@ -51,7 +51,7 @@ reset_config none
 
 To flash an STM32 for example, run the following command from your OpenOCD
 build directory. Replace ```firmware.elf``` with the name of your ELF file, and
-```std32g0x.cfg``` with the appropriate file for your microcontroller.
+```stm32g0x.cfg``` with the appropriate file for your microcontroller.
 
 ```
 ./src/openocd --search tcl \
