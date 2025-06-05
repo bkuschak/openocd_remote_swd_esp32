@@ -5,37 +5,40 @@
 extern "C" {
 #endif
 
-#define REMOTE_SWD_SW_VERSION   0x0100      // 8 bit major, 8 bit minor
-//#define REMOTE_SWD_PROTOCOL   0x01        // TODO - client side must match this.
+#define REMOTE_SWD_SW_VERSION         0x0100      // 8 bit major, 8 bit minor
+#define REMOTE_SWD_PROTOCOL_VERSION   0x01        // Client side must match this.
 
-#define REMOTE_SWD_TCP_PORT     5253
+#define REMOTE_SWD_TCP_PORT           5253
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a)   (sizeof(a) / sizeof((a)[0]))
 #endif
 
 // First 4 bits hold the command code.
-#define FLAGS_CMD_VERSION       (1<<0)
-#define FLAGS_CMD_SERIAL_NUM    (2<<0)
-#define FLAGS_CMD_SPEED         (3<<0)     // speed in 'data' field
-#define FLAGS_CMD_RESET         (4<<0)     // NRST state in 'data' field
-#define FLAGS_CMD_LED           (5<<0)     // on/off in 'data' field    // TODO -remove
-#define FLAGS_CMD_SWITCH_SEQ    (6<<0)
-#define FLAGS_CMD_READ_REG      (7<<0)
-#define FLAGS_CMD_WRITE_REG     (8<<0)
-#define FLAGS_CMD(flags)        (flags & 0x0F)
+#define FLAGS_OP_PROTOCOL       (1<<0)    // Get remote protocol version.
+#define FLAGS_OP_VERSION        (2<<0)    // Get remote HW/SW version.
+#define FLAGS_OP_SERIAL_NUM     (3<<0)    // Get remote serial number.
+#define FLAGS_OP_SPEED          (4<<0)    // Set speed in 'data' field.
+#define FLAGS_OP_RESET          (5<<0)    // Set NRST state in 'data' field.
+#define FLAGS_OP_SWITCH_SEQ     (6<<0)    // Send sequence in 'data' field.
+#define FLAGS_OP_READ_REG       (7<<0)    // SWD read register.
+#define FLAGS_OP_WRITE_REG      (8<<0)    // SWD write register.
+#define FLAGS_OP(flags)         (flags & 0x0F)
 
 // Remaining bits are reserved for flags.
 #define FLAGS_EXPECT_ACK        (1<<4)
 #define FLAGS_EXPECT_DATA       (1<<5)
+#define FLAGS_SRST_OPEN_DRAIN   (1<<4)    // Used for OP_RESET only.
 
 struct queued_command {
-    uint8_t flags;              // input
-    uint8_t cmd;                // input - SWD cmd
-    uint8_t final_clocks;       // input            // FIXME should this be uint32?
-    uint8_t ack;                // output (3 bits)
-    uint32_t data;              // input or output
+    uint8_t flags;              // Opcode and flags.
+    uint8_t ap_delay_clks;      // inAdditional clock cycles sent after data.
+    uint8_t cmd;                // SWD command field.
+    uint8_t ack;                // SWD ACK field (3 bits).
+    uint32_t data;              // SWD data, sent or returned.
 };
+
+//#define DEBUG_PRINTING
 
 #ifdef DEBUG_PRINTING
 #define LOG_DEBUG(...) \
@@ -113,7 +116,9 @@ int remote_swd_server_init(uint32_t serial_num, uint16_t hw_version, uint16_t po
         // Read state of SWDIO.
         bool (*swdio_read)(void),
         // Generate an active-high pulse on SWCLK.
-        int (*swclk_send_pulse)(void));
+        int (*swclk_send_pulse)(void),
+        // Set the state of the SRST (NRST) pin.
+        int (*set_srst)(bool val, bool open_drain));
 
 // Process any pending packets, execute the commands, and generate responses.
 // Returns zero on success or nothing to do, and <0 on error.
@@ -126,19 +131,19 @@ int remote_swd_server_process(void);
 int remote_swd_switch_seq(enum swd_special_seq seq);
 void remote_swd_write_sequence(const uint8_t* data, int len);
 void remote_swd_write_reg(uint8_t cmd, uint32_t data, uint8_t* ack,
-        int final_clocks);
+        int ap_delay_clks);
 int remote_swd_read_reg(uint8_t cmd, uint32_t* data, uint8_t* ack,
-        int final_clocks);
+        int ap_delay_clks);
 
 // Perform SWD reads/writes to DP or AP.
 int remote_swd_read_dp_reg(uint8_t addr, uint32_t* data, uint8_t* ack,
-        int final_clocks, char* name);
+        int ap_delay_clks, char* name);
 void remote_swd_write_dp_reg(uint8_t addr, uint32_t data, uint8_t* ack,
-        int final_clocks, char* name);
+        int ap_delay_clks, char* name);
 int remote_swd_read_ap_reg(uint8_t addr, uint32_t* data, uint8_t* ack,
-        int final_clocks, char* name);
+        int ap_delay_clks, char* name);
 void remote_swd_write_ap_reg(uint8_t addr, uint32_t data, uint8_t* ack,
-        int final_clocks, char* name);
+        int ap_delay_clks, char* name);
 int check_error(void);
 
 #ifdef __cplusplus

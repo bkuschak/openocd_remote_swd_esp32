@@ -2,8 +2,8 @@
 // Allows a cheap ESP32 to flash an ARM microcontroller using SWD over TCP/IP.
 // remote_swd is much faster than the OpenOCD remote_bitbang driver.
 //
-// Tested using ESP32-C6-MINI:
-// - flashing a 48KB ELF firmware image to STM32G0x1 takes 10 seconds.
+// Tested using the XIAO ESP32C6:
+// - flashing 64KB firmware image to STM32F103 Blue Pill takes 6.6 seconds.
 //
 // Prerequisite libraries:
 //   - https://github.com/contrem/arduino-timer
@@ -34,14 +34,27 @@
 #define HW_VERSION_MAJOR    1
 #define HW_VERSION_MINOR    0
 
-// GPIO pins used with the ESP32-C6-MINI board.
+// Define a supported board. See below.
+#define BOARD_XIAO_ESP32C6
+
+// GPIO pins used on the board.
 // Change these if necessary to match your hardware.
+#if defined(BOARD_XIAO_ESP32C6)
+#define GPIO_SWCLK          GPIO_NUM_21   // D3
+#define GPIO_SWDIO          GPIO_NUM_22   // D4
+#define GPIO_SRESET         GPIO_NUM_16   // D6
+#define LED_PIN             LED_BUILTIN
+
+#elif defined(BOARD_ESP32_C6_MINI_1)
 #define GPIO_SWCLK          GPIO_NUM_21
 #define GPIO_SWDIO          GPIO_NUM_22
-#define GPIO_SWDIO_UNUSED   GPIO_NUM_23
-
-// Activity LED pin
+#define GPIO_SWDIO_UNUSED   GPIO_NUM_23   // future experimental use of MOSI/MISO.
+#define GPIO_SRESET         GPIO_NUM_16
 #define LED_PIN             GPIO_NUM_7
+
+#else
+#error "Board not defined!"
+#endif
 
 static Timer<2> timer;
 static bool led_state;
@@ -134,22 +147,35 @@ static int swdio_swclk_init(void)
   // register access later for toggling the pins quickly.
   gpio_reset_pin(GPIO_SWCLK);
   gpio_reset_pin(GPIO_SWDIO);
+#ifdef GPIO_SWDIO_UNUSED
   gpio_reset_pin(GPIO_SWDIO_UNUSED);
+#endif
+  gpio_reset_pin(GPIO_SRESET);
 
+  // SRST as input (high-z), until commanded otherwise.
+  gpio_set_direction(GPIO_SRESET, GPIO_MODE_INPUT);
+  
   // SWCLK as output low.
   gpio_set_level(GPIO_SWCLK, 0);
   gpio_set_direction(GPIO_SWCLK, GPIO_MODE_OUTPUT);
 
   // SWD as input.
   gpio_set_direction(GPIO_SWDIO, GPIO_MODE_INPUT);
+#ifdef GPIO_SWDIO_UNUSED
   gpio_set_direction(GPIO_SWDIO_UNUSED, GPIO_MODE_INPUT);
+#endif
 
   // SWD as input.
+#ifdef GPIO_SWDIO_UNUSED
   GPIO.enable_w1tc.enable_w1tc = (1<<GPIO_SWDIO) | (1<<GPIO_SWDIO_UNUSED);
+#else
+  GPIO.enable_w1tc.enable_w1tc = (1<<GPIO_SWDIO);
+#endif
 
   // SWCLK as output low.
   GPIO.out_w1tc.val = 1<<GPIO_SWCLK;
   GPIO.enable_w1ts.enable_w1ts = 1<<GPIO_SWCLK;
+  
   return 0;
 }
 
@@ -177,9 +203,9 @@ static bool swdio_read(void)
   return (GPIO.in.in_data_next & (1<<GPIO_SWDIO));
 }
 
-static int swdio_write(bool bit)
+static int swdio_write(bool val)
 {
-  if(bit)
+  if(val)
     GPIO.out_w1ts.val = 1<<GPIO_SWDIO;
   else
     GPIO.out_w1tc.val = 1<<GPIO_SWDIO;
@@ -194,6 +220,32 @@ static int swclk_send_pulse(void)
   GPIO.out_w1ts.val = 1<<GPIO_SWCLK;
   asm volatile("nop\n");
   GPIO.out_w1tc.val = 1<<GPIO_SWCLK;
+  return 0;
+}
+
+static int set_srst(bool asserted, bool open_drain)
+{
+  // value is true if the reset signal should be asserted.
+  // The signal is typically NRST# which is active low.
+  if(asserted) {
+    // Assert reset.
+    Serial.println("SRST low.");
+    gpio_set_level(GPIO_SRESET, 0);
+    gpio_set_direction(GPIO_SRESET, GPIO_MODE_OUTPUT);
+  }
+  else {
+    if(open_drain) {
+      Serial.println("Open drain SRST high.");
+      gpio_set_direction(GPIO_SRESET, GPIO_MODE_INPUT);
+      gpio_set_level(GPIO_SRESET, 1);
+    }
+    else {
+      // Push-pull output.
+      Serial.println("Push/pull SRST high.");
+      gpio_set_level(GPIO_SRESET, 1);
+      gpio_set_direction(GPIO_SWCLK, GPIO_MODE_OUTPUT);
+    }
+  }
   return 0;
 }
 
@@ -229,6 +281,8 @@ void setup()
   serial_number |= mac_addr[3]; serial_number <<= 8;
   serial_number |= mac_addr[4]; serial_number <<= 8;
   serial_number |= mac_addr[5];
+  Serial.print("MAC address: ");
+  Serial.println(mac_addr_str);
 
   // Connect to WiFi and monitor it every 10 seconds.
   connect_wifi();
@@ -240,7 +294,7 @@ void setup()
   int ret = remote_swd_server_init(
               serial_number, hw_version, REMOTE_SWD_TCP_PORT,
               swdio_swclk_init, swdio_input, swdio_output,
-              swdio_write, swdio_read, swclk_send_pulse);
+              swdio_write, swdio_read, swclk_send_pulse, set_srst);
   if(ret < 0)
     fprintf(stderr, "Failed initializing remote_swd server.\n");
 }

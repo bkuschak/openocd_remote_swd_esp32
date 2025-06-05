@@ -2,7 +2,7 @@
 // Intended as a much faster alternative to the remote_bitbang driver.
 // This file implements the protocol processing that is platform-independent.
 //
-// References:
+// For reference, this page has a good description of the physical SWD protocol:
 // https://qcentlabs.com/posts/swd_banger/
 
 #include <errno.h>
@@ -149,6 +149,7 @@ static int (*swdio_output_)(void);
 static int (*swdio_write_)(bool bit);
 static bool (*swdio_read_)(void);
 static int (*swclk_pulse_)(void);
+static int (*set_srst_)(bool val, bool open_drain);
 
 // Socket I/O function pointers that are set by the user.
 static int (*socket_available_)(void);
@@ -349,6 +350,7 @@ int remote_swd_init(uint32_t serial_number, uint16_t hw_version,
         int (*swdio_write)(bool bit),
         bool (*swdio_read)(void),
         int (*swclk_send_pulse)(void),
+        int (*set_srst)(bool val, bool open_drain),
         int (*socket_available)(void),
         int (*socket_read)(void* buf, int len),
         int (*socket_write)(void* buf, int len))
@@ -361,6 +363,7 @@ int remote_swd_init(uint32_t serial_number, uint16_t hw_version,
     swdio_write_ = swdio_write;
     swdio_read_ = swdio_read;
     swclk_pulse_ = swclk_send_pulse;
+    set_srst_ = set_srst;
     socket_available_ = socket_available;
     socket_read_ = socket_read;
     socket_write_ = socket_write;
@@ -410,7 +413,7 @@ static inline int parity_u32(uint32_t x)
 #endif
 }
 
-void remote_swd_write_reg(uint8_t cmd, uint32_t data, uint8_t* ack, int final_clocks)
+void remote_swd_write_reg(uint8_t cmd, uint32_t data, uint8_t* ack, int ap_delay_clks)
 {
     bool bit;
 
@@ -457,14 +460,14 @@ void remote_swd_write_reg(uint8_t cmd, uint32_t data, uint8_t* ack, int final_cl
     swclk_pulse_();
 
     // Send final clocks, if any, with SWD=0.
-    for(int i=0; i<final_clocks; i++) {
+    for(int i=0; i<ap_delay_clks; i++) {
         swdio_write_(0);
         swclk_pulse_();
     }
 }
 
 // Return 0 on success, or <0 on parity error.
-int remote_swd_read_reg(uint8_t cmd, uint32_t* data, uint8_t* ack, int final_clocks)
+int remote_swd_read_reg(uint8_t cmd, uint32_t* data, uint8_t* ack, int ap_delay_clks)
 {
     bool bit;
 
@@ -514,7 +517,7 @@ int remote_swd_read_reg(uint8_t cmd, uint32_t* data, uint8_t* ack, int final_clo
     swdio_write_(0);
 
     // Send final clocks, if any, with SWD=0.
-    for(int i=0; i<final_clocks; i++)
+    for(int i=0; i<ap_delay_clks; i++)
         swclk_pulse_();
 
     // We expect odd parity, so the 'parity' result should be 0.
@@ -547,11 +550,11 @@ static inline uint8_t swd_cmd(bool is_read, bool is_ap, uint8_t regnum)
 // Convenience functions - usage optional.
 // Read a DP register.
 // Addr must be <= 0xC.
-int remote_swd_read_dp_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int final_clocks,
+int remote_swd_read_dp_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int ap_delay_clks,
         char* name)
 {
     uint8_t cmd = swd_cmd(true, false, addr);
-    int ret = remote_swd_read_reg(cmd, data, ack, final_clocks);
+    int ret = remote_swd_read_reg(cmd, data, ack, ap_delay_clks);
     if(ret != 0)
         fprintf(stderr, "RD DP %s (0x%X) failed: ack=%hx, data=%08x\n",
                 name, addr, *ack, *data);
@@ -563,11 +566,11 @@ int remote_swd_read_dp_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int final
 
 // Write a DP register.
 // Addr must be <= 0xC.
-void remote_swd_write_dp_reg(uint8_t addr, uint32_t data, uint8_t* ack, int final_clocks,
+void remote_swd_write_dp_reg(uint8_t addr, uint32_t data, uint8_t* ack, int ap_delay_clks,
         char* name)
 {
     uint8_t cmd = swd_cmd(false, false, addr);
-    remote_swd_write_reg(cmd, data, ack, final_clocks);
+    remote_swd_write_reg(cmd, data, ack, ap_delay_clks);
     fprintf(stderr, "WR DP %s (0x%X): ack=%hx, data=%08x.\n",
             name, addr, *ack, data);
 }
@@ -576,11 +579,11 @@ void remote_swd_write_dp_reg(uint8_t addr, uint32_t data, uint8_t* ack, int fina
 
 // Read an AP register.
 // Addr must be <= 0xC.
-int remote_swd_read_ap_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int final_clocks,
+int remote_swd_read_ap_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int ap_delay_clks,
         char* name)
 {
     uint8_t cmd = swd_cmd(true, true, addr);
-    int ret = remote_swd_read_reg(cmd, data, ack, final_clocks);
+    int ret = remote_swd_read_reg(cmd, data, ack, ap_delay_clks);
     if(ret != 0)
         fprintf(stderr, "RD AP %s (0x%X) failed: ack=%hx, data=%08x\n",
                 name, addr, *ack, *data);
@@ -592,11 +595,11 @@ int remote_swd_read_ap_reg(uint8_t addr, uint32_t* data, uint8_t* ack, int final
 
 // Write an AP register.
 // Addr must be <= 0xC.
-void remote_swd_write_ap_reg(uint8_t addr, uint32_t data, uint8_t* ack, int final_clocks,
+void remote_swd_write_ap_reg(uint8_t addr, uint32_t data, uint8_t* ack, int ap_delay_clks,
         char* name)
 {
     uint8_t cmd = swd_cmd(false, true, addr);
-    remote_swd_write_reg(cmd, data, ack, final_clocks);
+    remote_swd_write_reg(cmd, data, ack, ap_delay_clks);
     fprintf(stderr, "WR AP %s (0x%X): ack=%hx, data=%08x.\n",
             name, addr, *ack, data);
 }
@@ -605,10 +608,10 @@ void remote_swd_write_ap_reg(uint8_t addr, uint32_t data, uint8_t* ack, int fina
 // TODO - handle other errors.
 int remote_swd_check_error(void)
 {
-  int final_clocks = 10;
+  int ap_delay_clks = 10;
   uint8_t ack;
   uint32_t data;
-  int ret = remote_swd_read_dp_reg(0x4, &data, &ack, final_clocks, "CTRL/STAT");
+  int ret = remote_swd_read_dp_reg(0x4, &data, &ack, ap_delay_clks, "CTRL/STAT");
   if(ret != 0) {
       fprintf(stderr, "Failed reading CTRL/STAT\n");
       return ret;
@@ -626,13 +629,18 @@ int remote_swd_check_error(void)
           fprintf(stderr, "STICKY ORUN\n");
       }
       uint32_t val = 0x1E;
-      remote_swd_write_dp_reg(0x0, val, &ack, final_clocks, "ABORT");
+      remote_swd_write_dp_reg(0x0, val, &ack, ap_delay_clks, "ABORT");
   }
   return 0;
 }
 
 // ----------------------------------------------------------------------------
 // These are called in response to packets received from the OpenOCD driver.
+
+static void protocol_version(uint32_t* data)
+{
+    *data = REMOTE_SWD_PROTOCOL_VERSION;
+}
 
 static void version(uint32_t* data)
 {
@@ -645,12 +653,11 @@ static void serial_number(uint32_t* data)
     *data = serial_number_;
 }
 
-static int swd_reset(uint32_t data)
+static int swd_reset(uint32_t flags, uint32_t data)
 {
     bool srst = data & 0x01;
-    bool trst = data & 0x02;
-    // TODO assert resets.
-    return 0;
+    bool open_drain = flags & FLAGS_SRST_OPEN_DRAIN;
+    return set_srst_(srst, open_drain);
 }
 
 static int swd_speed(int speed)
@@ -702,30 +709,38 @@ int remote_swd_run_command(struct queued_command* command, struct queued_command
     response->ack = 0;
     response->data = 0;
 
-    switch(FLAGS_CMD(command->flags)) {
-        case FLAGS_CMD_VERSION:
+    switch(FLAGS_OP(command->flags)) {
+        case FLAGS_OP_PROTOCOL:
+            LOG_DEBUG("Got PROTOCOL");
+            protocol_version(&response->data);
+            break;
+        case FLAGS_OP_VERSION:
             LOG_DEBUG("Got VERSION");
             version(&response->data);
             break;
-        case FLAGS_CMD_SERIAL_NUM:
+        case FLAGS_OP_SERIAL_NUM:
             LOG_DEBUG("Got SERIAL_NUM");
             serial_number(&response->data);
             break;
-        case FLAGS_CMD_SPEED:
+        case FLAGS_OP_SPEED:
             LOG_DEBUG("Got SPEED");
             swd_speed(command->data);
             break;
-        case FLAGS_CMD_SWITCH_SEQ:
+        case FLAGS_OP_RESET:
+            LOG_DEBUG("Got RESET");
+            swd_reset(command->flags, command->data);
+            break;
+        case FLAGS_OP_SWITCH_SEQ:
             LOG_DEBUG("Got SWITCH_SEQ");
             remote_swd_switch_seq(command->data);
             break;
-        case FLAGS_CMD_WRITE_REG:
+        case FLAGS_OP_WRITE_REG:
             LOG_DEBUG("Got WRITE_REG: cmd=%08x, data=%08x", command->cmd, command->data);
-            remote_swd_write_reg(command->cmd, command->data, &response->ack, command->final_clocks);
+            remote_swd_write_reg(command->cmd, command->data, &response->ack, command->ap_delay_clks);
             break;
-        case FLAGS_CMD_READ_REG:
+        case FLAGS_OP_READ_REG:
             LOG_DEBUG("Got READ_REG: cmd=%08x", command->cmd);
-            ret = remote_swd_read_reg(command->cmd, &response->data, &response->ack, command->final_clocks);
+            ret = remote_swd_read_reg(command->cmd, &response->data, &response->ack, command->ap_delay_clks);
             if(ret != 0)
                 LOG_DEBUG("Parity error on register read!");
             break;
@@ -805,7 +820,8 @@ int remote_swd_server_init(uint32_t serial_number, uint16_t hw_version, uint16_t
         int (*swdio_output)(void),
         int (*swdio_write)(bool bit),
         bool (*swdio_read)(void),
-        int (*swclk_send_pulse)(void))
+        int (*swclk_send_pulse)(void),
+        int (*set_srst)(bool val, bool open_drain))
 {
     int ret = start_server(port_number);
     if(ret < 0) {
@@ -816,7 +832,7 @@ int remote_swd_server_init(uint32_t serial_number, uint16_t hw_version, uint16_t
     // Initialize the SWD library.
     return remote_swd_init(serial_number, hw_version,
             swdio_swclk_init, swdio_input, swdio_output, swdio_write, swdio_read,
-            swclk_send_pulse, socket_available, socket_read, socket_write);
+            swclk_send_pulse, set_srst, socket_available, socket_read, socket_write);
 }
 
 int remote_swd_server_process(void)
