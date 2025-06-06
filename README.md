@@ -1,10 +1,10 @@
 ## remote_swd for OpenOCD
 
 This is a remote-side implementation of the new OpenOCD remote_swd protocol,
-using an ESP32 as the remote programmer. This device can be used, for example,
-to program the flash memory of an ARM microcontroller using the two-wire SWD
-interface. OpenOCD connects to this programmer using TCP/IP over WiFi,
-allowing remote flashing and debugging of the ARM target. 
+using an ESP32 as the remote programmer. This device can be used to program the
+flash memory of an ARM microcontroller using the two-wire SWD interface.
+OpenOCD connects to this programmer using TCP/IP over WiFi, allowing remote
+flashing and debugging of the ARM target. 
 
 The remote_swd driver is intended as a faster alternative to the OpenOCD
 remote_bitbang driver. Whereas remote_bitbang sends a separate TCP/IP packet
@@ -33,8 +33,8 @@ The current software has some limitations:
 
 - There is no support for adjusting the SWCLK frequency. It was measured at
   about 900 KHz.
-- The WiFi credentials are currently hardcoded. The software must be rebuilt to
-  change them.
+- The WiFi credentials are currently hardcoded. The software must be rebuilt if
+  you want to change them.
 
 To configure your WiFi SSID and password, copy the
 ```wifi_password_example.h``` file to ```wifi_password.h``` and edit it
