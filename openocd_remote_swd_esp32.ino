@@ -2,6 +2,8 @@
 // Allows a cheap ESP32 to flash an ARM microcontroller using SWD over TCP/IP.
 // remote_swd is much faster than the OpenOCD remote_bitbang driver.
 //
+// Brian Kuschak <bkuschak@gmail.com>
+//
 // Tested using the XIAO ESP32C6:
 // - flashing 64KB firmware image to STM32F103 Blue Pill takes 6.6 seconds.
 //

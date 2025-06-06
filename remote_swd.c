@@ -2,6 +2,8 @@
 // Intended as a much faster alternative to the remote_bitbang driver.
 // This file implements the protocol processing that is platform-independent.
 //
+// Brian Kuschak <bkuschak@gmail.com>
+//
 // For reference, this page has a good description of the physical SWD protocol:
 // https://qcentlabs.com/posts/swd_banger/
 
