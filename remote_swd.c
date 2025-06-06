@@ -7,6 +7,7 @@
 // For reference, this page has a good description of the physical SWD protocol:
 // https://qcentlabs.com/posts/swd_banger/
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -786,9 +787,15 @@ int remote_swd_process(void)
         if(ret_cmd < 0)
             break;
 
+        // Packet uses network byte order.
+        command.data = ntohl(command.data);
+
         ret_cmd = remote_swd_run_command(&command, response);
         if(ret_cmd < 0)
             break;
+
+        // Packet uses network byte order.
+        response->data = htonl(response->data);
 
         if(++response_idx == ARRAY_SIZE(responses))
             break;
