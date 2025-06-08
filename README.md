@@ -31,8 +31,9 @@ perform each 32-bit SWD transfer.
 
 The current software has some limitations:
 
-- There is no support for adjusting the SWCLK frequency. It was measured at
-  about 900 KHz.
+- There is currently no support for adjusting the SWCLK frequency. It was
+  measured at about 900 KHz. (The protocol supports setting the speed, but this
+  feature isn't implemented yet in the firmware).
 - The WiFi credentials are currently hardcoded. The software must be rebuilt if
   you want to change them.
 
