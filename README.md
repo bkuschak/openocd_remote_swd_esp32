@@ -1,3 +1,12 @@
+# Note: This project has been retired
+This repository is deprecated and no longer supported. The remote_swd protocol was 
+experimental and it has been deprecated in favor of the new cmsis_dap_tcp protocol.  
+
+Please refer to [cmsis_dap_tcp_esp32](https://github.com/bkuschak/cmsis_dap_tcp_esp32) 
+instead.
+
+<hr>
+
 ## remote_swd for OpenOCD
 
 This is a remote-side implementation of the new OpenOCD remote_swd protocol,
